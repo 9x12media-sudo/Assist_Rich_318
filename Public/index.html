@@ -1,0 +1,463 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0" />
+  <title>AI Phone Assistant</title>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: #1a3a5c; font-family: 'DM Sans', sans-serif; color: #e8e8f0; -webkit-tap-highlight-color: transparent; }
+    input, button { font-family: 'DM Sans', sans-serif; }
+    @keyframes fadeIn  { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+    @keyframes wave    { from { height: 4px; } to { height: 18px; } }
+    ::-webkit-scrollbar { width: 3px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 99px; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState, useEffect, useRef } = React;
+
+    // ── Mock call data ──────────────────────────────────────────────────────
+    const MOCK_CALLS = [
+      { id:"CA001", from:"+1 (415) 555-0192", time:"2:34 PM", duration:"1m 42s", status:"voicemail",
+        summary:"Sarah from Acme Corp — asking about project timeline. Wants a callback before Friday.", turns:4 },
+      { id:"CA002", from:"+1 (628) 555-0847", time:"1:15 PM", duration:"0m 18s", status:"blocked",
+        summary:"Detected as robocall — extended silence + pre-recorded opener.", turns:1 },
+      { id:"CA003", from:"+1 (510) 555-0334", time:"11:02 AM", duration:"0m 52s", status:"forwarded",
+        summary:"Caller said it was urgent — personal matter. Forwarded immediately.", turns:2 },
+      { id:"CA004", from:"+1 (707) 555-0211", time:"9:47 AM", duration:"2m 11s", status:"voicemail",
+        summary:"James — wants to reschedule the Wednesday meeting to Thursday afternoon.", turns:5 },
+    ];
+
+    const STATUS_META = {
+      voicemail: { label:"Voicemail", color:"#4FC3F7", bg:"rgba(79,195,247,0.12)",  icon:"✉" },
+      forwarded: { label:"Forwarded", color:"#81C784", bg:"rgba(129,199,132,0.12)", icon:"↗" },
+      blocked:   { label:"Blocked",   color:"#EF9A9A", bg:"rgba(239,154,154,0.12)", icon:"✕" },
+    };
+
+    // ── Waveform ────────────────────────────────────────────────────────────
+    function Waveform({ active }) {
+      return (
+        <div style={{ display:"flex", alignItems:"center", gap:3, height:20 }}>
+          {[...Array(5)].map((_,i) => (
+            <div key={i} style={{
+              width:3, borderRadius:99,
+              background: active ? "#4FC3F7" : "#2a3a4a",
+              height: active ? undefined : 4,
+              animation: active ? `wave ${0.8+i*0.15}s ease-in-out infinite alternate` : "none",
+              animationDelay:`${i*0.1}s`,
+            }} />
+          ))}
+        </div>
+      );
+    }
+
+    // ── Call Card ───────────────────────────────────────────────────────────
+    function CallCard({ call, selected, onClick, onDelete }) {
+      const meta = STATUS_META[call.status];
+      return (
+        <div style={{ display:"flex", alignItems:"stretch", gap:8, marginBottom:8 }}>
+          <button
+            onClick={e => { e.stopPropagation(); onDelete(call.id); }}
+            title="Delete"
+            style={{
+              flexShrink:0, width:36, borderRadius:10, cursor:"pointer",
+              background:"rgba(239,154,154,0.15)", border:"1px solid rgba(239,154,154,0.35)",
+              color:"#EF9A9A", fontSize:15, display:"flex", alignItems:"center",
+              justifyContent:"center", transition:"all 0.15s", padding:0,
+            }}
+            onMouseEnter={e=>{ e.currentTarget.style.background="rgba(239,154,154,0.3)"; e.currentTarget.style.borderColor="rgba(239,154,154,0.6)"; }}
+            onMouseLeave={e=>{ e.currentTarget.style.background="rgba(239,154,154,0.15)"; e.currentTarget.style.borderColor="rgba(239,154,154,0.35)"; }}
+          >🗑</button>
+
+          <div onClick={onClick} style={{
+            flex:1, padding:"14px 16px", borderRadius:12, cursor:"pointer",
+            background: selected ? "rgba(79,195,247,0.07)" : "transparent",
+            border:`1px solid ${selected ? "rgba(79,195,247,0.3)" : "rgba(255,255,255,0.05)"}`,
+            transition:"all 0.2s",
+          }}>
+            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start" }}>
+              <div>
+                <div style={{ fontFamily:"'DM Mono',monospace", fontSize:14, color:"#e8e8f0", marginBottom:3 }}>{call.from}</div>
+                <div style={{ fontSize:12, color:"#555570" }}>{call.time} · {call.duration}</div>
+              </div>
+              <span style={{
+                fontSize:10, fontWeight:600, letterSpacing:"0.06em",
+                color:meta.color, background:meta.bg, border:`1px solid ${meta.color}33`,
+                borderRadius:6, padding:"3px 8px", textTransform:"uppercase", whiteSpace:"nowrap",
+              }}>{meta.icon} {meta.label}</span>
+            </div>
+            <div style={{ marginTop:8, fontSize:13, color:"#7878a0", lineHeight:1.5,
+              display:"-webkit-box", WebkitLineClamp:2, WebkitBoxOrient:"vertical", overflow:"hidden" }}>
+              {call.summary}
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // ── Profile Panel ───────────────────────────────────────────────────────
+    function ProfilePanel() {
+      const [firstName, setFirstName] = useState("");
+      const [myNumber,  setMyNumber]  = useState("");
+      const [twilioNum, setTwilioNum] = useState("");
+      const [saved,     setSaved]     = useState(false);
+
+      const inputStyle = {
+        width:"100%", background:"rgba(255,255,255,0.04)", border:"1px solid rgba(255,255,255,0.09)",
+        borderRadius:8, padding:"10px 13px", color:"#e8e8f0", fontSize:13, outline:"none",
+      };
+
+      async function handleSave() {
+        try {
+          await fetch("/config/profile", { method:"POST",
+            headers:{"Content-Type":"application/json"},
+            body: JSON.stringify({ firstName, myNumber, twilioNum }) });
+        } catch(e) {}
+        setSaved(true);
+        setTimeout(() => setSaved(false), 2500);
+      }
+
+      const hasContent = firstName.trim() || myNumber.trim() || twilioNum.trim();
+
+      return (
+        <div style={{ background:"rgba(255,255,255,0.02)", border:"1px solid rgba(100,160,255,0.2)", borderRadius:14, padding:"20px", marginBottom:16 }}>
+          <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:10 }}>
+            <span style={{ fontSize:15 }}>👤</span>
+            <span style={{ fontSize:12, fontWeight:600, color:"#4a6a9a", textTransform:"uppercase", letterSpacing:"0.1em" }}>Your Profile</span>
+            {saved && <span style={{ marginLeft:"auto", fontSize:11, background:"rgba(129,199,132,0.12)", color:"#81C784", border:"1px solid rgba(129,199,132,0.25)", borderRadius:99, padding:"2px 10px" }}>✓ Saved</span>}
+          </div>
+          <p style={{ fontSize:12, color:"#55556a", marginBottom:16, lineHeight:1.6 }}>The AI uses this info to greet callers and route calls correctly.</p>
+          <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
+            <div>
+              <label style={{ fontSize:11, color:"#7a9abf", textTransform:"uppercase", letterSpacing:"0.08em", display:"block", marginBottom:5 }}>Your First Name</label>
+              <input style={inputStyle} placeholder="e.g. Alex" value={firstName} onChange={e=>setFirstName(e.target.value)} />
+            </div>
+            <div>
+              <label style={{ fontSize:11, color:"#7a9abf", textTransform:"uppercase", letterSpacing:"0.08em", display:"block", marginBottom:5 }}>Your Personal Phone Number</label>
+              <input style={{...inputStyle, fontFamily:"'DM Mono',monospace"}} placeholder="+1 (555) 000-0000" value={myNumber} onChange={e=>setMyNumber(e.target.value)} />
+              <div style={{ fontSize:11, color:"#3a5a7a", marginTop:4 }}>This is your real number — keep it private.</div>
+            </div>
+            <div>
+              <label style={{ fontSize:11, color:"#7a9abf", textTransform:"uppercase", letterSpacing:"0.08em", display:"block", marginBottom:5 }}>Your Twilio Number</label>
+              <input style={{...inputStyle, fontFamily:"'DM Mono',monospace"}} placeholder="+1 (800) 000-0000" value={twilioNum} onChange={e=>setTwilioNum(e.target.value)} />
+              <div style={{ fontSize:11, color:"#3a5a7a", marginTop:4, lineHeight:1.6 }}>
+                Visit <span style={{ color:"#7a9abf" }}>twilio.com</span> to purchase a number. All incoming calls will be forwarded to this number, and you can also hand it out directly so people can call it themselves.
+              </div>
+            </div>
+            <button onClick={handleSave} disabled={!hasContent} style={{
+              marginTop:4, background: hasContent ? "rgba(100,160,255,0.15)" : "rgba(255,255,255,0.04)",
+              border:`1px solid ${hasContent ? "rgba(100,160,255,0.35)" : "rgba(255,255,255,0.07)"}`,
+              color: hasContent ? "#FFE033" : "#44445a", fontWeight:600, fontSize:13,
+              padding:"10px", borderRadius:8, cursor: hasContent ? "pointer" : "default",
+              transition:"all 0.2s", width:"100%",
+            }}>Save Profile</button>
+          </div>
+        </div>
+      );
+    }
+
+    // ── Favorites Panel ─────────────────────────────────────────────────────
+    const INITIAL_FAVORITES = [
+      { number:"+14155550100", name:"Mom" },
+      { number:"+16505550192", name:"Dr. Patel" },
+    ];
+
+    function FavoritesPanel() {
+      const [favorites, setFavorites] = useState(INITIAL_FAVORITES);
+      const [newName, setNewName] = useState("");
+      const [newNum,  setNewNum]  = useState("");
+      const [error,   setError]   = useState("");
+
+      function normalizeNumber(raw) {
+        const d = raw.replace(/\D/g,"");
+        if (d.length===10) return `+1${d}`;
+        if (d.length===11 && d.startsWith("1")) return `+${d}`;
+        return d ? `+${d}` : "";
+      }
+
+      async function addFavorite() {
+        const normalized = normalizeNumber(newNum);
+        if (!normalized || normalized.length < 8) { setError("Enter a valid phone number."); return; }
+        if (favorites.find(f=>f.number===normalized)) { setError("Already in your favorites."); return; }
+        setFavorites(prev=>[...prev,{number:normalized, name:newName.trim()||"Unnamed"}]);
+        try { await fetch("/favorites",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({number:normalized,name:newName})}); } catch(e){}
+        setNewName(""); setNewNum(""); setError("");
+      }
+
+      async function removeFavorite(number) {
+        setFavorites(prev=>prev.filter(f=>f.number!==number));
+        try { await fetch(`/favorites/${encodeURIComponent(number)}`,{method:"DELETE"}); } catch(e){}
+      }
+
+      const inputStyle = { width:"100%", background:"rgba(255,255,255,0.04)", border:"1px solid rgba(255,255,255,0.09)", borderRadius:8, padding:"9px 13px", color:"#e8e8f0", fontSize:13, outline:"none" };
+
+      return (
+        <div style={{ background:"rgba(255,255,255,0.02)", border:"1px solid rgba(255,215,0,0.15)", borderRadius:14, padding:"20px", marginBottom:16 }}>
+          <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:10 }}>
+            <span style={{ fontSize:15 }}>⭐</span>
+            <span style={{ fontSize:12, fontWeight:600, color:"#a08030", textTransform:"uppercase", letterSpacing:"0.1em" }}>VIP Pass-Through</span>
+            <span style={{ marginLeft:"auto", fontSize:11, background:"rgba(255,215,0,0.1)", color:"#c8a020", border:"1px solid rgba(255,215,0,0.2)", borderRadius:99, padding:"2px 9px" }}>{favorites.length} numbers</span>
+          </div>
+          <p style={{ fontSize:12, color:"#55556a", marginBottom:16, lineHeight:1.6 }}>Calls from these numbers skip the AI and ring you directly.</p>
+          <div style={{ display:"flex", flexDirection:"column", gap:8, marginBottom:16 }}>
+            {favorites.length===0 && <div style={{ fontSize:13, color:"#35354a", textAlign:"center", padding:"16px 0" }}>No favorites yet</div>}
+            {favorites.map(fav=>(
+              <div key={fav.number} style={{ display:"flex", alignItems:"center", gap:12, padding:"10px 14px", background:"rgba(255,215,0,0.04)", border:"1px solid rgba(255,215,0,0.1)", borderRadius:10 }}>
+                <div style={{ width:32, height:32, borderRadius:"50%", background:"rgba(255,215,0,0.12)", display:"flex", alignItems:"center", justifyContent:"center", fontSize:14, flexShrink:0 }}>
+                  {fav.name?.[0]?.toUpperCase()??"?"}
+                </div>
+                <div style={{ flex:1, minWidth:0 }}>
+                  <div style={{ fontSize:13, fontWeight:500, color:"#e8e8f0", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{fav.name}</div>
+                  <div style={{ fontSize:11, color:"#55556a", fontFamily:"'DM Mono',monospace" }}>{fav.number}</div>
+                </div>
+                <button onClick={()=>removeFavorite(fav.number)} style={{ background:"none", border:"none", cursor:"pointer", color:"#55556a", fontSize:18, padding:"2px 6px", borderRadius:6 }}
+                  onMouseEnter={e=>e.target.style.color="#EF9A9A"} onMouseLeave={e=>e.target.style.color="#55556a"}>×</button>
+              </div>
+            ))}
+          </div>
+          <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
+            <input style={inputStyle} placeholder="Name" value={newName} onChange={e=>{setNewName(e.target.value);setError("");}} />
+            <input style={{...inputStyle,fontFamily:"'DM Mono',monospace"}} placeholder="+1 (555) 000-0000" value={newNum} onChange={e=>{setNewNum(e.target.value);setError("");}} onKeyDown={e=>e.key==="Enter"&&addFavorite()} />
+            <button onClick={addFavorite} style={{ background:"rgba(255,215,0,0.12)", border:"1px solid rgba(255,215,0,0.25)", color:"#c8a020", fontWeight:600, fontSize:13, padding:"10px", borderRadius:8, cursor:"pointer", width:"100%" }}
+              onMouseEnter={e=>e.currentTarget.style.background="rgba(255,215,0,0.2)"} onMouseLeave={e=>e.currentTarget.style.background="rgba(255,215,0,0.12)"}>
+              + Add to VIP List
+            </button>
+          </div>
+          {error && <div style={{ fontSize:12, color:"#EF9A9A", marginTop:8 }}>{error}</div>}
+        </div>
+      );
+    }
+
+    // ── Blocked Keywords Panel ──────────────────────────────────────────────
+    const DEFAULT_KEYWORDS = ["insurance","warranty","loan offer","free cruise","limited time"];
+
+    function BlockedKeywordsPanel() {
+      const [keywords, setKeywords] = useState(DEFAULT_KEYWORDS);
+      const [draft, setDraft] = useState("");
+      const [error, setError] = useState("");
+
+      async function addKeyword() {
+        const trimmed = draft.trim().toLowerCase();
+        if (!trimmed) { setError("Please enter a keyword."); return; }
+        if (keywords.includes(trimmed)) { setError("Already in the list."); return; }
+        setKeywords(prev=>[...prev,trimmed]);
+        try { await fetch("/config/blocked-keywords",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({keyword:trimmed})}); } catch(e){}
+        setDraft(""); setError("");
+      }
+
+      async function removeKeyword(kw) {
+        setKeywords(prev=>prev.filter(k=>k!==kw));
+        try { await fetch(`/config/blocked-keywords/${encodeURIComponent(kw)}`,{method:"DELETE"}); } catch(e){}
+      }
+
+      return (
+        <div style={{ background:"rgba(255,255,255,0.02)", border:"1px solid rgba(239,154,154,0.18)", borderRadius:14, padding:"20px", marginBottom:16 }}>
+          <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:10 }}>
+            <span style={{ fontSize:15 }}>🚫</span>
+            <span style={{ fontSize:12, fontWeight:600, color:"#7a4a4a", textTransform:"uppercase", letterSpacing:"0.1em" }}>Blocked Keywords</span>
+            <span style={{ marginLeft:"auto", fontSize:11, background:"rgba(239,154,154,0.1)", color:"#EF9A9A", border:"1px solid rgba(239,154,154,0.2)", borderRadius:99, padding:"2px 9px" }}>{keywords.length} active</span>
+          </div>
+          <p style={{ fontSize:12, color:"#55556a", marginBottom:14, lineHeight:1.6 }}>If a caller says any of these words or phrases, the call is automatically blocked.</p>
+          <div style={{ display:"flex", flexWrap:"wrap", gap:7, marginBottom:14, minHeight:28 }}>
+            {keywords.length===0 && <span style={{ fontSize:12, color:"#35354a" }}>No keywords yet</span>}
+            {keywords.map(kw=>(
+              <span key={kw} style={{ display:"inline-flex", alignItems:"center", gap:5, background:"rgba(239,154,154,0.08)", border:"1px solid rgba(239,154,154,0.2)", borderRadius:99, padding:"4px 10px 4px 12px", fontSize:12, color:"#d08080" }}>
+                {kw}
+                <button onClick={()=>removeKeyword(kw)} style={{ background:"none", border:"none", cursor:"pointer", color:"#7a4a4a", fontSize:14, lineHeight:1, padding:"0 1px", display:"flex", alignItems:"center" }}
+                  onMouseEnter={e=>e.currentTarget.style.color="#EF9A9A"} onMouseLeave={e=>e.currentTarget.style.color="#7a4a4a"}>×</button>
+              </span>
+            ))}
+          </div>
+          <div style={{ display:"flex", gap:8 }}>
+            <input style={{ flex:1, background:"rgba(255,255,255,0.04)", border:`1px solid ${error?"rgba(239,154,154,0.5)":"rgba(255,255,255,0.09)"}`, borderRadius:8, padding:"9px 13px", color:"#e8e8f0", fontSize:13, outline:"none" }}
+              placeholder='e.g. "final notice"' value={draft} onChange={e=>{setDraft(e.target.value);setError("");}} onKeyDown={e=>e.key==="Enter"&&addKeyword()} />
+            <button onClick={addKeyword} style={{ flexShrink:0, background:"rgba(239,154,154,0.1)", border:"1px solid rgba(239,154,154,0.25)", color:"#EF9A9A", fontWeight:600, fontSize:13, padding:"9px 16px", borderRadius:8, cursor:"pointer" }}
+              onMouseEnter={e=>e.currentTarget.style.background="rgba(239,154,154,0.18)"} onMouseLeave={e=>e.currentTarget.style.background="rgba(239,154,154,0.1)"}>+ Add</button>
+          </div>
+          {error && <div style={{ fontSize:12, color:"#EF9A9A", marginTop:8 }}>{error}</div>}
+        </div>
+      );
+    }
+
+    // ── Main App ────────────────────────────────────────────────────────────
+    function App() {
+      const [calls,      setCalls]      = useState(MOCK_CALLS);
+      const [selected,   setSelected]   = useState(null);
+      const [tab,        setTab]        = useState("calls");
+      const [liveActive, setLiveActive] = useState(false);
+      const [transcript, setTranscript] = useState([]);
+      const scrollRef = useRef(null);
+
+      function deleteCall(id) {
+        setCalls(prev=>prev.filter(c=>c.id!==id));
+        setSelected(prev=>prev?.id===id ? null : prev);
+      }
+
+      function simulateLiveCall() {
+        if (liveActive) return;
+        setLiveActive(true);
+        setTranscript([]);
+        const script = [
+          { role:"ai",     text:"Hi! You've reached Alex's AI assistant. How can I help you today?" },
+          { role:"caller", text:"Hi yeah, I'm calling about the invoice from last month, number 1047." },
+          { role:"ai",     text:"Got it. I'll pass that along to Alex. Can I get your name and best callback number?" },
+          { role:"caller", text:"Sure, it's Marcus, 628-555-0192." },
+          { role:"ai",     text:"Perfect, Marcus. I've noted that and Alex will follow up shortly. Thanks for calling!" },
+        ];
+        let i = 0;
+        const interval = setInterval(() => {
+          if (i >= script.length) { clearInterval(interval); setTimeout(()=>setLiveActive(false),1500); return; }
+          const line = script[i];
+          setTranscript(prev=>[...prev, line]);
+          i++;
+        }, 1800);
+      }
+
+      useEffect(() => {
+        if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+      }, [transcript]);
+
+      const voicemailCount = calls.filter(c=>c.status==="voicemail").length;
+      const forwardedCount = calls.filter(c=>c.status==="forwarded").length;
+      const blockedCount   = calls.filter(c=>c.status==="blocked").length;
+
+      const TABS = [
+        { id:"calls",    label:"Calls",    icon:"📋" },
+        { id:"settings", label:"Settings", icon:"⚙️" },
+        { id:"live",     label:"Live",     icon:"🎙️" },
+      ];
+
+      return (
+        <div style={{ minHeight:"100vh", background:"#1a3a5c", color:"#e8e8f0", maxWidth:600, margin:"0 auto" }}>
+
+          {/* Header */}
+          <div style={{ padding:"20px 16px 16px", borderBottom:"1px solid rgba(255,255,255,0.07)", position:"sticky", top:0, background:"#1a3a5c", zIndex:10 }}>
+            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+              <div>
+                <h1 style={{ fontSize:18, fontWeight:600, letterSpacing:"-0.01em" }}>AI Phone Assistant</h1>
+                <div style={{ fontSize:12, color:"#7a9abf", marginTop:2 }}>Today · {calls.length} call{calls.length!==1?"s":""} handled</div>
+              </div>
+              <div style={{ display:"flex", alignItems:"center", gap:7 }}>
+                <Waveform active={liveActive} />
+                <div style={{ width:7, height:7, borderRadius:"50%", background:liveActive?"#81C784":"#3a5a7a", boxShadow:liveActive?"0 0 7px #81C784":"none", transition:"all 0.3s" }} />
+              </div>
+            </div>
+            {/* Stats */}
+            <div style={{ display:"flex", gap:8, marginTop:14 }}>
+              {[
+                { label:"Voicemail", value:voicemailCount, color:"#4FC3F7" },
+                { label:"Forwarded", value:forwardedCount, color:"#81C784" },
+                { label:"Blocked",   value:blockedCount,   color:"#EF9A9A" },
+                { label:"Avg Turns", value:"3.0",          color:"#CE93D8" },
+              ].map(s=>(
+                <div key={s.label} style={{ flex:1, textAlign:"center", background:"rgba(255,255,255,0.05)", borderRadius:10, padding:"10px 4px" }}>
+                  <div style={{ fontSize:20, fontWeight:700, color:s.color, fontFamily:"'DM Mono',monospace" }}>{s.value}</div>
+                  <div style={{ fontSize:9, color:"#7a9abf", marginTop:2, textTransform:"uppercase", letterSpacing:"0.06em" }}>{s.label}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Tab bar */}
+          <div style={{ display:"flex", borderBottom:"1px solid rgba(255,255,255,0.07)", background:"#1a3a5c", position:"sticky", top:130, zIndex:9 }}>
+            {TABS.map(t=>(
+              <button key={t.id} onClick={()=>{setTab(t.id);setSelected(null);}} style={{
+                flex:1, padding:"13px 0", background:"none", border:"none", cursor:"pointer",
+                fontSize:13, fontWeight:tab===t.id?600:400,
+                color:tab===t.id?"#e8e8f0":"#7a9abf",
+                borderBottom:`2px solid ${tab===t.id?"#4FC3F7":"transparent"}`,
+                transition:"all 0.2s", display:"flex", flexDirection:"column", alignItems:"center", gap:3,
+              }}>
+                <span style={{ fontSize:16 }}>{t.icon}</span>
+                <span>{t.label}</span>
+              </button>
+            ))}
+          </div>
+
+          {/* Tab content */}
+          <div style={{ padding:"16px" }}>
+
+            {/* CALLS */}
+            {tab==="calls" && (
+              <div>
+                {selected && (
+                  <div style={{ background:"rgba(255,255,255,0.04)", border:"1px solid rgba(255,255,255,0.1)", borderRadius:14, padding:"16px", marginBottom:16, animation:"fadeIn 0.2s ease" }}>
+                    <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:12 }}>
+                      <div>
+                        <div style={{ fontFamily:"'DM Mono',monospace", fontSize:14, marginBottom:3 }}>{selected.from}</div>
+                        <div style={{ fontSize:11, color:"#7a9abf" }}>{selected.time} · {selected.duration} · {selected.turns} turns</div>
+                      </div>
+                      <div style={{ display:"flex", gap:8, alignItems:"center" }}>
+                        <span style={{ fontSize:10, fontWeight:600, letterSpacing:"0.06em", color:STATUS_META[selected.status].color, background:STATUS_META[selected.status].bg, border:`1px solid ${STATUS_META[selected.status].color}33`, borderRadius:6, padding:"3px 9px", textTransform:"uppercase" }}>
+                          {STATUS_META[selected.status].icon} {STATUS_META[selected.status].label}
+                        </span>
+                        <button onClick={()=>setSelected(null)} style={{ background:"none", border:"none", color:"#7a9abf", fontSize:18, cursor:"pointer", padding:"0 4px" }}>×</button>
+                      </div>
+                    </div>
+                    <div style={{ background:"rgba(255,255,255,0.04)", borderRadius:10, padding:"12px", fontSize:13, color:"#a0b8d0", lineHeight:1.7 }}>
+                      <span style={{ fontSize:9, color:"#7a9abf", textTransform:"uppercase", letterSpacing:"0.1em", display:"block", marginBottom:6 }}>AI Summary</span>
+                      {selected.summary}
+                    </div>
+                  </div>
+                )}
+                {calls.length===0 && <div style={{ fontSize:13, color:"#3a5a7a", textAlign:"center", padding:"48px 0" }}>No call history</div>}
+                {calls.map(call=>(
+                  <CallCard key={call.id} call={call} selected={selected?.id===call.id}
+                    onClick={()=>setSelected(prev=>prev?.id===call.id?null:call)} onDelete={deleteCall} />
+                ))}
+              </div>
+            )}
+
+            {/* SETTINGS */}
+            {tab==="settings" && (
+              <div>
+                <ProfilePanel />
+                <FavoritesPanel />
+                <BlockedKeywordsPanel />
+              </div>
+            )}
+
+            {/* LIVE */}
+            {tab==="live" && (
+              <div style={{ background:"rgba(255,255,255,0.03)", border:`1px solid ${liveActive?"rgba(129,199,132,0.25)":"rgba(255,255,255,0.07)"}`, borderRadius:14, padding:"20px 16px", transition:"border-color 0.3s" }}>
+                <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:16 }}>
+                  <div style={{ fontSize:12, fontWeight:600, color:"#7a9abf", textTransform:"uppercase", letterSpacing:"0.1em" }}>Live Transcript Demo</div>
+                  <button onClick={simulateLiveCall} disabled={liveActive} style={{
+                    fontSize:12, fontWeight:600, padding:"8px 16px", borderRadius:8, border:"none",
+                    cursor:liveActive?"not-allowed":"pointer",
+                    background:liveActive?"rgba(129,199,132,0.1)":"rgba(79,195,247,0.15)",
+                    color:liveActive?"#81C784":"#4FC3F7", transition:"all 0.2s",
+                  }}>{liveActive?"● Live...":"Simulate Call"}</button>
+                </div>
+                <div ref={scrollRef} style={{ minHeight:160, maxHeight:400, overflowY:"auto", display:"flex", flexDirection:"column", gap:12 }}>
+                  {transcript.length===0 && <div style={{ fontSize:13, color:"#3a5a7a", textAlign:"center", marginTop:48 }}>Press "Simulate Call" to see a live transcript</div>}
+                  {transcript.map((line,i)=>(
+                    <div key={i} style={{ display:"flex", gap:10, alignItems:"flex-start", animation:"fadeIn 0.3s ease" }}>
+                      <span style={{ fontSize:10, fontWeight:700, letterSpacing:"0.06em", color:line.role==="ai"?"#4FC3F7":"#CE93D8", minWidth:44, marginTop:3, textTransform:"uppercase", flexShrink:0 }}>
+                        {line.role==="ai"?"AI":"Caller"}
+                      </span>
+                      <span style={{ fontSize:13, color:"#b0c8e0", lineHeight:1.6 }}>{line.text}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+          </div>
+        </div>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+  </script>
+</body>
+</html>
