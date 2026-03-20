@@ -119,7 +119,7 @@ async function containsBlockedKeyword(text) {
 }
 
 function getSystemPrompt() {
-  const name = CONFIG.firstName || "[YOUR NAME]";
+  const name = CONFIG.firstName || "Richard";
   return `You are an AI phone assistant for ${name}. Your job is to answer the phone on their behalf.
 
 Your behavior rules:
