@@ -30,39 +30,47 @@ const db = new Pool({
 });
 
 async function initDB() {
-  await db.query(`
-    CREATE TABLE IF NOT EXISTS favorites (
-      number     TEXT PRIMARY KEY,
-      name       TEXT NOT NULL DEFAULT '',
-      added_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    );
+  console.log("DATABASE_URL is set:", !!process.env.DATABASE_URL);
+  try {
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS favorites (
+        number     TEXT PRIMARY KEY,
+        name       TEXT NOT NULL DEFAULT '',
+        added_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
 
-    CREATE TABLE IF NOT EXISTS blocked_keywords (
-      keyword    TEXT PRIMARY KEY,
-      added_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    );
+      CREATE TABLE IF NOT EXISTS blocked_keywords (
+        keyword    TEXT PRIMARY KEY,
+        added_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
 
-    CREATE TABLE IF NOT EXISTS calls (
-      id          TEXT PRIMARY KEY,
-      from_number TEXT NOT NULL,
-      time        TEXT NOT NULL,
-      duration    TEXT NOT NULL DEFAULT '0m 0s',
-      status      TEXT NOT NULL DEFAULT 'voicemail',
-      summary     TEXT NOT NULL DEFAULT '',
-      turns       INT  NOT NULL DEFAULT 0,
-      created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    );
+      CREATE TABLE IF NOT EXISTS calls (
+        id          TEXT PRIMARY KEY,
+        from_number TEXT NOT NULL,
+        time        TEXT NOT NULL,
+        duration    TEXT NOT NULL DEFAULT '0m 0s',
+        status      TEXT NOT NULL DEFAULT 'voicemail',
+        summary     TEXT NOT NULL DEFAULT '',
+        turns       INT  NOT NULL DEFAULT 0,
+        created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
 
-    CREATE TABLE IF NOT EXISTS profile (
-      key   TEXT PRIMARY KEY,
-      value TEXT NOT NULL DEFAULT ''
-    );
+      CREATE TABLE IF NOT EXISTS profile (
+        key   TEXT PRIMARY KEY,
+        value TEXT NOT NULL DEFAULT ''
+      );
 
-    INSERT INTO blocked_keywords (keyword) VALUES
-      ('insurance'), ('warranty'), ('loan offer'), ('free cruise'), ('limited time')
-    ON CONFLICT DO NOTHING;
-  `);
-  console.log("Database tables ready");
+      INSERT INTO blocked_keywords (keyword) VALUES
+        ('insurance'), ('warranty'), ('loan offer'), ('free cruise'), ('limited time')
+      ON CONFLICT DO NOTHING;
+    `);
+    console.log("Database tables ready");
+  } catch (err) {
+    console.error("initDB query failed — message:", err.message);
+    console.error("initDB query failed — code:", err.code);
+    if (err.detail) console.error("initDB query failed — detail:", err.detail);
+    throw err;
+  }
 }
 
 const callSessions = new Map();
@@ -313,4 +321,4 @@ const PORT = process.env.PORT ?? 3000;
 initDB()
   .then(loadProfileFromDB)
   .then(() => app.listen(PORT, () => console.log(`Server running on port ${PORT}`)))
-  .catch(err => { console.error("DB init failed:", err.message); process.exit(1); });
+  .catch(err => { console.error("DB init failed:", err); process.exit(1); });
